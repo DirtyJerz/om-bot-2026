@@ -5,23 +5,21 @@
 #include <WebServer.h>
 #include <DNSServer.h>
 #include <ESP32Servo.h>
-#include <DFRobotDFPlayerMini.h>
 
 // AP Credentials
 const char *ap_ssid = "Romeo-Robot";
 const char *ap_password = "12345678";
 
 // Pins
-#define SERVO1_PIN 6
-#define SERVO2_PIN 7
-#define SERVO3_PIN 20
+#define SERVO_HEAD_PIN 6    // Servo 1: Head
+#define SERVO_WING_L_PIN 7  // Servo 2: Left Wing
+#define SERVO_WING_R_PIN 20 // Servo 3: Right Wing
+#define SERVO_TAIL_PIN 21   // Servo 4: Tail (added pin, update as needed)
 #define DF_RX 4
 #define DF_TX 5
 #define BUSY_PIN 3
 
-Servo servo1, servo2, servo3;
-HardwareSerial dfSerial(1);
-DFRobotDFPlayerMini dfPlayer;
+Servo servoHead, servoWingL, servoWingR, servoTail;
 WebServer server(80);
 DNSServer dnsServer;
 
@@ -29,43 +27,86 @@ DNSServer dnsServer;
 const char index_html[] PROGMEM = R"rawliteral(
 <!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1">
 <style>
-    body{font-family:sans-serif;text-align:center;background:#f4f4f9;padding:20px;}
-    .card{max-width:400px;margin:auto;background:white;padding:20px;border-radius:15px;box-shadow:0 4px 15px rgba(0,0,0,0.1);}
-    input[type=range]{width:100%;height:40px;margin:10px 0;}
-    button{padding:12px;margin:5px;width:45%;border-radius:8px;border:none;background:#007bff;color:white;font-weight:bold;cursor:pointer;}
-    .center-btn{width:92%; background:#6c757d; margin-top:10px;}
-    .stop{background:#dc3545;}
-    button:active{opacity:0.8;}
+  body{font-family:sans-serif;text-align:center;background:#f4f4f9;padding:20px;}
+  .card{max-width:400px;margin:auto;background:white;padding:20px;border-radius:15px;box-shadow:0 4px 15px rgba(0,0,0,0.1);}
+  input[type=range]{width:100%;height:40px;margin:10px 0;}
+  button{padding:12px;margin:5px;width:45%;border-radius:8px;border:none;background:#007bff;color:white;font-weight:bold;cursor:pointer;}
+  .center-btn{width:92%; background:#6c757d; margin-top:10px;}
+  .stop{background:#dc3545;}
+  button:active{opacity:0.8;}
 </style></head><body><div class="card">
-    <h2>Robot Control</h2>
-    <p>Servo 1<br><input type="range" id="s1" min="0" max="180" value="90" oninput="sendServo(1,this.value)"></p>
-    <p>Servo 2<br><input type="range" id="s2" min="0" max="180" value="90" oninput="sendServo(2,this.value)"></p>
-    <p>Servo 3<br><input type="range" id="s3" min="0" max="180" value="90" oninput="sendServo(3,this.value)"></p>
-    
-    <button class="center-btn" onclick="centerAll()">CENTER ALL SERVOS</button>
-    <hr>
-    <button onclick="fetch('/audio?c=play&v=1')">Play 0001</button>
-    <button onclick="fetch('/audio?c=play&v=2')">Play 0002</button>
-    <button class="stop" onclick="fetch('/audio?c=stop')">STOP AUDIO</button>
+  <h2>Robot Control</h2>
+  <p>Head<br>
+    <button onclick="moveServo(1, 'left')">Left</button>
+    <button onclick="moveServo(1, 'right')">Right</button>
+    <button onclick="sweepServo(1)">Sweep</button>
+  </p>
+  <p>Wings (L+R)<br>
+    <button onclick="moveServo('wings', 'left')">Left</button>
+    <button onclick="moveServo('wings', 'right')">Right</button>
+    <button onclick="sweepServo('wings')">Sweep</button>
+  </p>
+  <p>All Servos<br>
+    <button onclick="sweepAllServos()">Sweep All</button>
+  </p>
+  <p>Tail<br>
+    <button onclick="moveServo(4, 'left')">Left</button>
+    <button onclick="moveServo(4, 'right')">Right</button>
+    <button onclick="sweepServo(4)">Sweep</button>
+  </p>
+  <button class="center-btn" onclick="centerAll()">CENTER ALL SERVOS</button>
+  <hr>
 </div>
 <script>
     let lastCall = 0;
     const throttleDelay = 80; 
 
     function sendServo(num, val) {
-        const now = Date.now();
-        if (now - lastCall > throttleDelay) {
-            lastCall = now;
-            fetch(`/servo?n=${num}&v=${val}`);
+      if(num === 'wings') {
+        fetch(`/servo?n=2&v=${val}`);
+        fetch(`/servo?n=3&v=${180-val}`);
+      } else {
+        fetch(`/servo?n=${num}&v=${val}`);
+      }
+    }
+    // Sweep all servos simultaneously two times
+    function sweepAllServos() {
+      let positions = [30, 150, 30, 150, 90, 30, 150, 30, 150, 90];
+      let i = 0;
+      function next() {
+        if (i < positions.length) {
+          sendServo(1, positions[i]);
+          sendServo('wings', positions[i]);
+          sendServo(4, positions[i]);
+          i++;
+          setTimeout(next, 400);
         }
+      }
+      next();
+    }
+
+    // Move servo left/right
+    function moveServo(num, dir) {
+      let val = dir === 'left' ? 30 : 150;
+      sendServo(num, val);
+    }
+
+    // Sweep left-right-left-right on button press
+    function sweepServo(num) {
+      let positions = [30, 150, 30, 150, 90];
+      let i = 0;
+      function next() {
+        if (i < positions.length) {
+          sendServo(num, positions[i]);
+          i++;
+          setTimeout(next, 350);
+        }
+      }
+      next();
     }
 
     function centerAll() {
-        // Reset the UI sliders
-        document.getElementById('s1').value = 90;
-        document.getElementById('s2').value = 90;
-        document.getElementById('s3').value = 90;
-        // Send the center command to ESP32
+        // Center all servos
         fetch('/servo?n=all&v=90');
     }
 </script>
@@ -82,31 +123,25 @@ void handleServo()
 
     if (n == "all")
     {
-      servo1.write(v);
-      servo2.write(v);
-      servo3.write(v);
+      servoHead.write(v);
+      servoWingL.write(v);
+      servoWingR.write(180 - v);
+      servoTail.write(v);
     }
     else
     {
       int num = n.toInt();
       if (num == 1)
-        servo1.write(v);
+        servoHead.write(v);
       else if (num == 2)
-        servo2.write(v);
+        servoWingL.write(v);
       else if (num == 3)
-        servo3.write(v);
+        servoWingR.write(v);
+      else if (num == 4)
+        servoTail.write(v);
     }
     server.send(200, "text/plain", "OK");
   }
-}
-void handleAudio()
-{
-  String c = server.arg("c");
-  if (c == "play")
-    dfPlayer.play(server.arg("v").toInt());
-  else if (c == "stop")
-    dfPlayer.stop();
-  server.send(200, "text/plain", "OK");
 }
 
 void setup()
@@ -125,23 +160,15 @@ void setup()
   // 2. Servos
   ESP32PWM::allocateTimer(0);
   ESP32PWM::allocateTimer(1);
-  servo1.attach(SERVO1_PIN, 500, 2400);
-  servo2.attach(SERVO2_PIN, 500, 2400);
-  servo3.attach(SERVO3_PIN, 500, 2400);
+  servoHead.attach(SERVO_HEAD_PIN, 500, 2400);
+  servoWingL.attach(SERVO_WING_L_PIN, 500, 2400);
+  servoWingR.attach(SERVO_WING_R_PIN, 500, 2400);
+  servoTail.attach(SERVO_TAIL_PIN, 500, 2400);
 
-  // 3. DFPlayer
-  dfSerial.begin(9600, SERIAL_8N1, DF_RX, DF_TX);
-  if (dfPlayer.begin(dfSerial))
-  {
-    dfPlayer.volume(20);
-    Serial.println("DFPlayer Online");
-  }
-
-  // 4. Web Routes
+  // 3. Web Routes
   server.on("/", []()
             { server.send(200, "text/html", index_html); });
   server.on("/servo", handleServo);
-  server.on("/audio", handleAudio);
   server.on("/favicon.ico", []()
             { server.send(204); }); // Quietly handle favicon requests
 
